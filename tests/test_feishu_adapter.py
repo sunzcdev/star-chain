@@ -33,8 +33,14 @@ def _make_inbound_msg(
         conversation=Conversation(chat_id=chat_id, chat_type=chat_type),
         sender=Identity(open_id=sender_id),
         mentions=mentions or [],
-        mentioned_bot=mentioned_bot,
+        mentioned_all=False,
+        reply=None,
+        content=None,
+        raw={},
         content_text=text,
+        resources=[],
+        mentioned_bot=mentioned_bot,
+        raw_content_type="text",
     )
 
 

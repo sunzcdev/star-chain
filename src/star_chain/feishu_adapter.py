@@ -78,11 +78,11 @@ class FeishuAdapter(ChannelAdapter):
     async def _handle_message(self, msg: InboundMessage) -> None:
         if not self._on_message or not self._running:
             return
-        sender_id = msg.sender_id
-        chat_id = msg.chat_id
-        chat_type = msg.chat_type
+        sender_id = msg.sender.open_id if msg.sender else ""
+        chat_id = msg.conversation.chat_id if msg.conversation else ""
+        chat_type = msg.conversation.chat_type if msg.conversation else ""
         text = (msg.content_text or "").strip()
-        message_id = msg.message_id
+        message_id = msg.id
         if not text:
             return
         if chat_type == "group" and self._require_mention:
