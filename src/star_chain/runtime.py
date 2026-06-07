@@ -17,8 +17,8 @@ from .session import SessionContext
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
-DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3"
+DEFAULT_BASE_URL = "https://api.deepseek.com"
+DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_MAX_TURNS = 30
 DEFAULT_API_TIMEOUT = 60
 DEFAULT_SESSION_DIR = "~/.star-chain/sessions"
@@ -36,13 +36,14 @@ class AgentRuntime:
         *,
         base_url: str | None = None,
         api_key: str | None = None,
-        model: str = DEFAULT_MODEL,
+        model: str | None = None,
         max_turns: int = DEFAULT_MAX_TURNS,
         api_timeout: int = DEFAULT_API_TIMEOUT,
         session_dir: str = DEFAULT_SESSION_DIR,
     ) -> None:
         resolved_base = base_url or os.environ.get("DEEPSEEK_BASE_URL") or DEFAULT_BASE_URL
         resolved_key = api_key or os.environ.get("DEEPSEEK_API_KEY") or ""
+        resolved_model = model or os.environ.get("DEEPSEEK_MODEL") or DEFAULT_MODEL
 
         self._client = AsyncOpenAI(
             base_url=resolved_base,
@@ -50,7 +51,7 @@ class AgentRuntime:
             timeout=api_timeout,
         )
         self._model = OpenAIChatCompletionsModel(
-            model=model,
+            model=resolved_model,
             openai_client=self._client,
         )
         self._max_turns = max_turns
@@ -67,7 +68,7 @@ class AgentRuntime:
 
         logger.info(
             "AgentRuntime initialized (model=%s, base=%s, max_turns=%d)",
-            model, resolved_base, max_turns,
+            resolved_model, resolved_base, max_turns,
         )
 
     # ---- public API ----
@@ -100,13 +101,16 @@ class AgentRuntime:
             return response
 
         except asyncio.TimeoutError:
-            error_msg = "暂时无法处理，请稍后再试。"
+            error_msg = "请求超时，请稍后再试。"
             session.add_assistant_message(error_msg)
             session.save()
             return error_msg
         except Exception as e:
-            logger.error("handle_message error for %s: %s", user_id, e)
-            return "系统繁忙，请稍后再试。"
+            logger.error("handle_message error for %s: %s", user_id, e, exc_info=True)
+            error_msg = f"处理失败：{e}"
+            session.add_assistant_message(error_msg)
+            session.save()
+            return error_msg
 
     async def new_session(self, user_id: str) -> None:
         session = self._get_or_create_session(user_id)

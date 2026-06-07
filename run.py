@@ -43,12 +43,6 @@ def _get_feishu_config() -> dict:
 async def main():
     setup_logging()
 
-    # LLM 配置
-    deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    deepseek_base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
-    deepseek_model = os.environ.get("DEEPSEEK_MODEL", "deepseek-ai/DeepSeek-V3")
-
-    # 飞书凭证
     feishu_cfg = _get_feishu_config()
     if not feishu_cfg["feishu_app_id"]:
         logger.error("飞书凭证缺失，退出")
@@ -57,12 +51,8 @@ async def main():
     session_dir = os.environ.get("STAR_CHAIN_SESSION_DIR", "~/.star-chain/sessions")
     max_turns = int(os.environ.get("STAR_CHAIN_MAX_TURNS", "30"))
 
-    # 1. 初始化 Runtime
     logger.info("Initializing AgentRuntime ...")
     runtime = AgentRuntime(
-        base_url=deepseek_base_url,
-        api_key=deepseek_api_key,
-        model=deepseek_model,
         max_turns=max_turns,
         session_dir=session_dir,
     )
