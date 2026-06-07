@@ -11,7 +11,7 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.agent_channel.session import SessionContext
+from src.star_chain.session import SessionContext
 
 
 def test_session_context():
@@ -73,7 +73,7 @@ def test_session_history_cap():
 
 def test_runtime_import():
     """Test that AgentRuntime can be constructed."""
-    from src.agent_channel.runtime import AgentRuntime
+    from src.star_chain.runtime import AgentRuntime
     # Just verify it can be instantiated — actual API calls need a real key
     rt = AgentRuntime(
         base_url="https://api.deepseek.com/v1",
@@ -87,19 +87,8 @@ def test_runtime_import():
     print("✓ test_runtime_import PASSED")
 
 
-def test_wechat_adapter_import():
-    """Test that WeChatAdapter can be constructed."""
-    from src.agent_channel.wechat_adapter import WeChatAdapter
-    adapter = WeChatAdapter(token="test-token", account_id="test-account")
-    assert adapter._token == "test-token"
-    assert adapter._account_id == "test-account"
-    assert adapter._running is False
-    print("✓ test_wechat_adapter_import PASSED")
-
-
 if __name__ == "__main__":
     test_session_context()
     test_session_history_cap()
     test_runtime_import()
-    test_wechat_adapter_import()
     print("\n✅ All tests passed!")

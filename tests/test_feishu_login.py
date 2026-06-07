@@ -27,8 +27,8 @@ _project_root = __file__.rsplit("/", 2)[0]
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.agent_channel.account_store import AccountCredential, AccountStore
-from src.agent_channel.feishu_login import feishu_login
+from src.star_chain.account_store import AccountCredential, AccountStore
+from src.star_chain.feishu_login import feishu_login
 
 # ---------------------------------------------------------------------------
 # fixtures
@@ -44,7 +44,7 @@ SAMPLE_RESULT = {
 @pytest.fixture(autouse=True)
 def enable_lark():
     """Force HAS_LARK=True so feishu_login doesn't short-circuit."""
-    with patch("src.agent_channel.feishu_login.HAS_LARK", True):
+    with patch("src.star_chain.feishu_login.HAS_LARK", True):
         yield
 
 
@@ -56,7 +56,7 @@ def mock_lark():
       - aregister_app: AsyncMock returning SAMPLE_RESULT by default
       - AppAccessDeniedError, AppExpiredError: real Exception subclasses
     """
-    with patch("src.agent_channel.feishu_login.lark") as m:
+    with patch("src.star_chain.feishu_login.lark") as m:
         m.aregister_app = AsyncMock(return_value=SAMPLE_RESULT)
         m.AppAccessDeniedError = type("AppAccessDeniedError", (Exception,), {})
         m.AppExpiredError = type("AppExpiredError", (Exception,), {})
@@ -122,7 +122,7 @@ async def test_success_path(mock_lark, mock_store):
 @pytest.mark.asyncio
 async def test_qr_callback_triggered(mock_lark, mock_store):
     """on_qr_code callback is passed to aregister_app and fires _render_qr."""
-    with patch("src.agent_channel.feishu_login._render_qr") as mock_render:
+    with patch("src.star_chain.feishu_login._render_qr") as mock_render:
         cred = await feishu_login(store=mock_store, json_mode=True)
 
         assert cred is not None
@@ -226,7 +226,7 @@ async def test_app_expired_returns_none(mock_lark, mock_store):
 @pytest.mark.asyncio
 async def test_no_lark_oapi_returns_none(mock_lark, mock_store):
     """HAS_LARK=False → feishu_login returns None without calling aregister_app."""
-    with patch("src.agent_channel.feishu_login.HAS_LARK", False):
+    with patch("src.star_chain.feishu_login.HAS_LARK", False):
         cred = await feishu_login(store=mock_store, json_mode=True)
 
     assert cred is None

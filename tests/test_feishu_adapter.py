@@ -9,8 +9,8 @@ _project_root = __file__.rsplit("/", 2)[0]
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from src.agent_channel.channel_adapter import MessageEvent, SendResult
-from src.agent_channel.feishu_adapter import FeishuAdapter
+from src.star_chain.channel_adapter import MessageEvent, SendResult
+from src.star_chain.feishu_adapter import FeishuAdapter
 from lark_oapi.channel.types import Conversation, Identity, InboundMessage, Mention
 
 
@@ -70,7 +70,7 @@ def test_feishu_adapter_instantiation():
 @pytest.mark.asyncio
 async def test_start_stop_lifecycle():
     """start() creates FeishuChannel & registers handlers; stop() disconnects."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         ch = _mocked_channel()
         MockChannel.return_value = ch
 
@@ -104,7 +104,7 @@ async def test_start_stop_lifecycle():
 @pytest.mark.asyncio
 async def test_p2p_message_processing():
     """P2P message triggers callback with correctly-constructed MessageEvent."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         MockChannel.return_value = _mocked_channel()
 
         adapter = FeishuAdapter(app_id="test-id", app_secret="test-secret")
@@ -141,7 +141,7 @@ async def test_p2p_message_processing():
 @pytest.mark.asyncio
 async def test_group_chat_mention_bot():
     """Group message with @bot mention triggers callback."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         MockChannel.return_value = _mocked_channel()
 
         adapter = FeishuAdapter(app_id="test-id", app_secret="test-secret")
@@ -183,7 +183,7 @@ async def test_group_chat_mention_bot():
 @pytest.mark.asyncio
 async def test_group_chat_no_mention():
     """Group message without @bot mention does NOT trigger callback."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         MockChannel.return_value = _mocked_channel()
 
         adapter = FeishuAdapter(app_id="test-id", app_secret="test-secret")
@@ -219,7 +219,7 @@ async def test_group_chat_no_mention():
 @pytest.mark.asyncio
 async def test_group_chat_strip_mention_prefix():
     """content_text has @bot mention prefix stripped before callback."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         MockChannel.return_value = _mocked_channel()
 
         adapter = FeishuAdapter(app_id="test-id", app_secret="test-secret")
@@ -259,7 +259,7 @@ async def test_group_chat_strip_mention_prefix():
 @pytest.mark.asyncio
 async def test_send_message_success():
     """send_message calls channel.send with correct arguments."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         ch = _mocked_channel()
         MockChannel.return_value = ch
 
@@ -287,7 +287,7 @@ async def test_send_message_success():
 @pytest.mark.asyncio
 async def test_send_message_empty_text():
     """Empty text returns SendResult(success=False) without calling channel.send."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         ch = _mocked_channel()
         MockChannel.return_value = ch
 
@@ -322,7 +322,7 @@ async def test_send_message_empty_text():
 @pytest.mark.asyncio
 async def test_chat_map_update():
     """After receiving a message, chat_map records chat_id; send_message prefers chat_id."""
-    with patch("src.agent_channel.feishu_adapter.FeishuChannel") as MockChannel:
+    with patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel:
         ch = _mocked_channel()
         MockChannel.return_value = ch
 
