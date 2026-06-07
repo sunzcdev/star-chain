@@ -9,6 +9,10 @@ from .code import (
     ALL_CODE_TOOLS,
     tool_read_file,
     tool_search_files,
+    tool_write_file,
+    tool_patch,
+    tool_terminal,
+    tool_execute_code,
 )
 from .web import ALL_WEB_TOOLS, tool_web_search
 from .skill import ALL_SKILL_TOOLS
@@ -22,7 +26,10 @@ READ_ONLY_TOOLS = [
 ALL_TOOLS = READ_ONLY_TOOLS + [
     t for t in ALL_CODE_TOOLS
     if t not in READ_ONLY_TOOLS
-] + ALL_WEB_TOOLS[1:] + ALL_SKILL_TOOLS
+] + [
+    t for t in ALL_WEB_TOOLS
+    if t not in READ_ONLY_TOOLS
+] + ALL_SKILL_TOOLS
 
 __all__ = [
     "ALL_CODE_TOOLS",
@@ -32,5 +39,9 @@ __all__ = [
     "ALL_TOOLS",
     "tool_read_file",
     "tool_search_files",
+    "tool_write_file",
+    "tool_patch",
+    "tool_terminal",
+    "tool_execute_code",
     "tool_web_search",
 ]
