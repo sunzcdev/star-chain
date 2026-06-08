@@ -270,23 +270,25 @@ star-chain/
 
 ## 九、演进路线
 
-### Phase 2 （当前）— Agent 拓扑精炼
+### Phase 2 — Agent 拓扑精炼 ✅（已完成）
 - [x] 三 Agent 定义（Chat/Plan/Executor）
-- [ ] 给 Plan Agent 绑定只读工具
-- [ ] 给 Executor Agent 绑定全工具
-- [ ] 验证 handoff 链端到端
+- [x] 给 Plan Agent 绑定只读工具
+- [x] 给 Executor Agent 绑定全工具
+- [x] 验证 handoff 链端到端
 
-### Phase 3 — 工具层集成
-- [ ] Code 原子能力实现
-- [ ] Web Search 集成
-- [ ] Skill 桥接（Claude Code / Open Code）
-- [ ] MCP Client 接入
+### Phase 3 — 工具层集成 ✅（代码已完成）
+- [x] Code 原子能力实现（read_file, write_file, patch, search_files, terminal, execute_code）
+- [x] Web Search 集成（search, extract — DuckDuckGo + httpx）
+- [x] Skill 桥接（run_skill, call_claude_code, call_open_code）
+- [x] MCP Client 接入（mcp_list, mcp_call — stdio client 管理）
 
-### Phase 4 — 生产化
+### Phase 4 — 生产化（当前/待完成）
+- [ ] 配置系统（YAML）- 可定制模型、工具、Agent 角色
+- [ ] 自定义插件注册机制
+- [ ] 流式响应（飞书消息逐段更新）
+- [ ] 媒体消息支持（图片、文件）
 - [ ] 部署方案（systemd / Docker）
 - [ ] 监控和告警
-- [ ] 媒体消息支持
-- [ ] Telegram 渠道
 
 ---
 

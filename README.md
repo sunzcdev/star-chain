@@ -54,9 +54,9 @@ python run.py
 
 - [x] Phase 0 — 技术验证（OpenAI Agents SDK handoff 可行性）
 - [x] Phase 1 — 飞书渠道层
-- [ ] Phase 2 — Agent 拓扑精炼（Chat/Plan/Executor）
-- [ ] Phase 3 — 工具层集成（Code · Web · Skill · MCP）
-- [ ] Phase 4 — 生产化
+- [x] Phase 2 — Agent 拓扑精炼（Chat/Plan/Executor）
+- [x] Phase 3 — 工具层集成（Code · Web · Skill · MCP）
+- [ ] Phase 4 — 生产化（部署 · 监控 · 流式响应 · 媒体消息）
 
 ## 许可证
 

@@ -114,11 +114,13 @@ def build_executor_agent(chat_agent: Agent) -> Agent:
 - Code 工具：read_file, write_file, patch, search_files, terminal, execute_code
 - Web 工具：web_search, web_extract
 - Skill 工具：run_skill, call_claude_code, call_open_code
+- MCP 工具：mcp_list, mcp_call
 
 执行原则：
 - 严格按照方案步骤执行，不要自由发挥
 - 需要写文件时用 write_file，需要局部修改用 patch
 - 需要执行命令时用 terminal，需要运行 Python 代码用 execute_code
+- 需要扩展能力时用 MCP 工具：先用 mcp_list 查看可用 Server，再用 mcp_call 调用
 - 调用合适的工具完成任务
 - 执行完毕报告结果、文件变更、关键数据
 - 遇到问题主动 handoff 回 Chat 讨论
@@ -187,6 +189,4 @@ __all__ = [
     "build_plan_agent",
     "build_executor_agent",
     "build_agent_topology",
-    "READ_ONLY_TOOLS",
-    "ALL_TOOLS",
 ]

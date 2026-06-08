@@ -14,8 +14,9 @@ from .code import (
     tool_terminal,
     tool_execute_code,
 )
-from .web import ALL_WEB_TOOLS, tool_web_search
+from .web import ALL_WEB_TOOLS, tool_web_search, tool_web_extract
 from .skill import ALL_SKILL_TOOLS
+from .mcp import ALL_MCP_TOOLS, tool_mcp_list, tool_mcp_call
 
 READ_ONLY_TOOLS = [
     tool_read_file,
@@ -29,12 +30,13 @@ ALL_TOOLS = READ_ONLY_TOOLS + [
 ] + [
     t for t in ALL_WEB_TOOLS
     if t not in READ_ONLY_TOOLS
-] + ALL_SKILL_TOOLS
+] + ALL_SKILL_TOOLS + ALL_MCP_TOOLS
 
 __all__ = [
     "ALL_CODE_TOOLS",
     "ALL_WEB_TOOLS",
     "ALL_SKILL_TOOLS",
+    "ALL_MCP_TOOLS",
     "READ_ONLY_TOOLS",
     "ALL_TOOLS",
     "tool_read_file",
@@ -44,4 +46,7 @@ __all__ = [
     "tool_terminal",
     "tool_execute_code",
     "tool_web_search",
+    "tool_web_extract",
+    "tool_mcp_list",
+    "tool_mcp_call",
 ]
