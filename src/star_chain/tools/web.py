@@ -3,13 +3,17 @@
 提供 web_search, web_extract 两个工具供 Agent 使用。
 
 实现方式：
-  - web_search: 通过 DuckDuckGo Lite 接口做关键词搜索（无需 API Key）
+  - web_search: 多搜索引擎 fallback 策略
+    * 优先 Bing (https://www.bing.com/search) - 全球可用，结果质量高
+    * 备选 Sogou (https://www.sogou.com/web) - 中文环境友好
+    * DuckDuckGo 作为末级 fallback（某些环境下被拦截）
   - web_extract: 通过 httpx 抓取页面内容，做基础 HTML→Markdown 转换
 """
 
+import html
 import re
 import time
-from typing import Optional
+from typing import Optional, Tuple, List
 from urllib.parse import quote_plus, urlparse
 
 import httpx
@@ -71,11 +75,166 @@ def _html_to_text(html: str, url: str = "") -> str:
 # ── 工具函数 ──────────────────────────────────────────────────────────
 
 
+# ── 搜索引擎解析器 ────────────────────────────────────────────────────
+
+
+def _parse_bing_results(html_text: str, limit: int) -> List[Tuple[str, str, str]]:
+    """解析 Bing 搜索结果页 HTML。
+
+    Bing 结果结构：
+      <li class="b_algo">
+        <h2><a href="URL">TITLE</a></h2>
+        <p class="b_caption / b_snippet">SNIPPET</p>
+      </li>
+    """
+    results: List[Tuple[str, str, str]] = []
+    for m in re.finditer(r'<li class="b_algo"[^>]*>(.*?)</li>', html_text, re.DOTALL):
+        block = m.group(1)
+        link_m = re.search(r'<h2[^>]*>\s*<a[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>\s*</h2>', block, re.DOTALL)
+        if not link_m:
+            link_m = re.search(r'<a[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>', block, re.DOTALL)
+        if not link_m:
+            continue
+        url = link_m.group(1).strip()
+        title = html.unescape(re.sub(r"<[^>]+>", "", link_m.group(2))).strip()
+        snippet = ""
+        snip_m = re.search(
+            r'<(?:p|div)[^>]*class="[^"]*(?:b_caption|b_snippet|b_richcard)[^"]*"[^>]*>(.*?)</(?:p|div)>',
+            block,
+            re.DOTALL,
+        )
+        if snip_m:
+            snippet = html.unescape(re.sub(r"<[^>]+>", "", snip_m.group(1))).strip()
+        results.append((title, url, snippet))
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _parse_sogou_results(html_text: str, limit: int) -> List[Tuple[str, str, str]]:
+    """解析 Sogou 搜索结果页 HTML。
+
+    Sogou 结果结构：
+      <div class="vrwrap">
+        <h3><a href="/link?url=...">TITLE</a></h3>
+        <p class="str-text-info">SNIPPET</p>
+      </div>
+    """
+    results: List[Tuple[str, str, str]] = []
+    for m in re.finditer(r'<div class="vrwrap"[^>]*>(.*?)</div>\s*</div>', html_text, re.DOTALL):
+        block = m.group(1)
+        link_m = re.search(r'<h3[^>]*>(.*?)</h3>', block, re.DOTALL)
+        if not link_m:
+            continue
+        h3_content = link_m.group(1)
+        url_m = re.search(r'href="([^"]+)"', h3_content)
+        title = html.unescape(re.sub(r"<[^>]+>", "", h3_content)).strip()
+        raw_url = url_m.group(1) if url_m else ""
+        if raw_url.startswith("/link?"):
+            url = f"https://www.sogou.com{raw_url}"
+        else:
+            url = raw_url
+        snippet = ""
+        snip_m = re.search(
+            r'<(?:p|div)[^>]*class="[^"]*(?:str-text-info|str_info|str-text)[^"]*"[^>]*>(.*?)</(?:p|div)>',
+            block,
+            re.DOTALL,
+        )
+        if snip_m:
+            snippet = html.unescape(re.sub(r"<[^>]+>", "", snip_m.group(1))).strip()
+        results.append((title, url, snippet))
+        if len(results) >= limit:
+            break
+    return results
+
+
+def _parse_duckduckgo_results(html_text: str, limit: int) -> List[Tuple[str, str, str]]:
+    """解析 DuckDuckGo Lite 结果页 HTML（作为 fallback）。"""
+    results: List[Tuple[str, str, str]] = []
+    pattern = re.compile(
+        r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
+        r".*?"
+        r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
+        re.DOTALL,
+    )
+    for m in pattern.finditer(html_text):
+        url = m.group(1).strip()
+        title = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+        snippet = html.unescape(re.sub(r"<[^>]+>", "", m.group(3))).strip()
+        results.append((title, url, snippet))
+        if len(results) >= limit:
+            break
+
+    if not results:
+        alt_pattern = re.compile(
+            r'<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
+            re.DOTALL,
+        )
+        for m in alt_pattern.finditer(html_text):
+            url = m.group(1).strip()
+            title = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+            results.append((title, url, ""))
+            if len(results) >= limit:
+                break
+    return results
+
+
+def _search_bing(query: str, limit: int) -> Optional[List[Tuple[str, str, str]]]:
+    """通过 Bing 搜索，返回结果列表或 None（失败时）。"""
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True) as client:
+            resp = client.get(
+                "https://www.bing.com/search",
+                params={"q": query},
+                headers={"User-Agent": USER_AGENT},
+            )
+            resp.raise_for_status()
+            results = _parse_bing_results(resp.text, limit)
+            return results if results else None
+    except Exception:
+        return None
+
+
+def _search_sogou(query: str, limit: int) -> Optional[List[Tuple[str, str, str]]]:
+    """通过 Sogou 搜索（中文环境友好），返回结果列表或 None（失败时）。"""
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True) as client:
+            resp = client.get(
+                "https://www.sogou.com/web",
+                params={"query": query},
+                headers={"User-Agent": USER_AGENT},
+            )
+            resp.raise_for_status()
+            results = _parse_sogou_results(resp.text, limit)
+            return results if results else None
+    except Exception:
+        return None
+
+
+def _search_duckduckgo(query: str, limit: int) -> Optional[List[Tuple[str, str, str]]]:
+    """通过 DuckDuckGo Lite 搜索（末级 fallback）。"""
+    try:
+        with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True) as client:
+            resp = client.post(
+                "https://html.duckduckgo.com/html/",
+                data={"q": query},
+                headers={"User-Agent": USER_AGENT},
+            )
+            resp.raise_for_status()
+            results = _parse_duckduckgo_results(resp.text, limit)
+            return results if results else None
+    except Exception:
+        return None
+
+
 def web_search(
     query: str,
     limit: int = 5,
 ) -> str:
-    """执行 Web 搜索（通过 DuckDuckGo Lite 接口）。
+    """执行 Web 搜索（多引擎 fallback 策略）。
+
+    按优先级依次尝试：Bing → Sogou → DuckDuckGo。
+    任一引擎返回有效结果即停止，避免无谓等待。
 
     Args:
         query: 搜索关键词
@@ -85,62 +244,39 @@ def web_search(
         格式化搜索结果列表（标题 + URL + 摘要）。
     """
     effective_limit = min(limit, 20)
-    try:
-        with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True) as client:
-            resp = client.post(
-                "https://html.duckduckgo.com/html/",
-                data={"q": query},
-                headers={"User-Agent": USER_AGENT},
-            )
-            resp.raise_for_status()
-            html = resp.text
-    except httpx.TimeoutException:
-        return f"搜索超时（{SEARCH_TIMEOUT}s）：{query}"
-    except httpx.HTTPStatusError as e:
-        return f"搜索 HTTP 错误：{e.response.status_code}"
-    except Exception as e:
-        return f"搜索出错：{e}"
+    errors: List[str] = []
 
-    # 解析 DuckDuckGo 结果页
-    # 结果在 <div class="result"> 中
-    results = []
-    # 用正则提取每个结果块
-    pattern = re.compile(
-        r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
-        r".*?"
-        r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>(.*?)</a>',
-        re.DOTALL,
-    )
-    for m in pattern.finditer(html):
-        url = m.group(1).strip()
-        title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-        snippet = re.sub(r"<[^>]+>", "", m.group(3)).strip()
-        results.append((title, url, snippet))
-        if len(results) >= effective_limit:
-            break
+    # 1. Bing（首选）
+    results = _search_bing(query, effective_limit)
+    if results:
+        engine = "Bing"
+    else:
+        errors.append("Bing: 无结果或不可达")
+        # 2. Sogou（备选，中文友好）
+        results = _search_sogou(query, effective_limit)
+        if results:
+            engine = "Sogou"
+        else:
+            errors.append("Sogou: 无结果或不可达")
+            # 3. DuckDuckGo（末级 fallback）
+            results = _search_duckduckgo(query, effective_limit)
+            if results:
+                engine = "DuckDuckGo"
+            else:
+                errors.append("DuckDuckGo: 无结果或不可达")
+                return (
+                    f"所有搜索引擎均不可用或无结果。\n"
+                    f"查询：{query}\n"
+                    f"详情：{'; '.join(errors)}"
+                )
 
-    if not results:
-        # fallback: 尝试更宽松的匹配
-        alt_pattern = re.compile(
-            r'<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-            re.DOTALL,
-        )
-        for m in alt_pattern.finditer(html):
-            url = m.group(1).strip()
-            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-            results.append((title, url, ""))
-            if len(results) >= effective_limit:
-                break
-
-    if not results:
-        return f"未找到「{query}」的搜索结果"
-
-    lines = [f"=== Web Search: {query} ==="]
+    lines = [f"=== Web Search ({engine}): {query} ==="]
     for i, (title, url, snippet) in enumerate(results, 1):
         lines.append(f"\n{i}. {title}")
         lines.append(f"   URL: {url}")
         if snippet:
-            lines.append(f"   {snippet[:200]}{'...' if len(snippet) > 200 else ''}")
+            snippet_clean = snippet[:200] + ("..." if len(snippet) > 200 else "")
+            lines.append(f"   {snippet_clean}")
 
     return "\n".join(lines)
 
