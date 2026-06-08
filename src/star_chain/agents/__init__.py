@@ -5,8 +5,8 @@
 
 每个 Agent 有明确的工具权限边界：
   - Chat: 无工具（纯对话角色）
-  - Plan: 只读工具（read_file, search_files, web_search）
-  - Executor: 全工具（Code + Web + Skill + MCP）
+  - Plan: 只读工具（read_file, search_files, any_search, web_search）
+  - Executor: 全工具（Code + Web + AnySearch + Skill + MCP）
 """
 
 from typing import Optional
@@ -74,12 +74,14 @@ def build_plan_agent(executor_agent: Agent, chat_agent: Agent, *, model: _ModelT
 你拥有的工具（且仅有这些）：
 - read_file: 读取文件内容
 - search_files: 搜索文件和内容
-- web_search: 搜索网页
+- any_search: AnySearch 实时搜索（优先使用，支持垂直领域/批量/网页提取）
+- web_search: 通用网页搜索（多引擎 fallback）
 
 工具权限边界（非常重要，必须严格遵守）：
 - 你**没有**写工具：不能调用 write_file, patch, terminal, execute_code
 - 你**没有**执行工具：不能调用任何命令或修改系统
 - 需要写文件、执行命令、运行代码时，**必须 handoff 给 Executor**，不要自己尝试
+- 优先使用 any_search，结果更精准；web_search 作为备选
 
 工作方式：
 - 接到需求后，先理解上下文，用只读工具做调研（读文件、搜网页）
@@ -122,11 +124,14 @@ def build_executor_agent(chat_agent: Agent, *, model: _ModelT = None) -> Agent:
 你拥有的全部工具：
 - Code 工具：read_file, write_file, patch, search_files, terminal, execute_code
 - Web 工具：web_search, web_extract
+- AnySearch 工具：any_search（优先使用）, any_search_domains, any_search_batch, any_search_extract
 - Skill 工具：run_skill, call_claude_code, call_open_code
 - MCP 工具：mcp_list, mcp_call
 
 执行原则：
 - 严格按照方案步骤执行，不要自由发挥
+- **搜索优先用 any_search**，结果更精准，支持垂直领域/批量搜索/网页全文提取
+- any_search 的 API Key 来自 ANYSEARCH_API_KEY 环境变量，已配置则速率更高
 - 需要写文件时用 write_file，需要局部修改用 patch
 - 需要执行命令时用 terminal，需要运行 Python 代码用 execute_code
 - 需要扩展能力时用 MCP 工具：先用 mcp_list 查看可用 Server，再用 mcp_call 调用

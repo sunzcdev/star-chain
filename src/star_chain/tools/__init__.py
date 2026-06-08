@@ -1,4 +1,4 @@
-"""工具层 — Code 原子能力、Web Search、Skill、MCP。
+"""工具层 — Code 原子能力、Web Search、AnySearch、Skill、MCP。
 
 工具集合分层导出，供不同角色的 Agent 按需取用：
   - READ_ONLY_TOOLS: Plan Agent 专用（不允许修改）
@@ -15,12 +15,20 @@ from .code import (
     tool_execute_code,
 )
 from .web import ALL_WEB_TOOLS, tool_web_search, tool_web_extract
+from .anysearch import (
+    ALL_ANYSEARCH_TOOLS,
+    tool_any_search,
+    tool_any_search_domains,
+    tool_any_search_batch,
+    tool_any_search_extract,
+)
 from .skill import ALL_SKILL_TOOLS
 from .mcp import ALL_MCP_TOOLS, tool_mcp_list, tool_mcp_call
 
 READ_ONLY_TOOLS = [
     tool_read_file,
     tool_search_files,
+    tool_any_search,
     tool_web_search,
 ]
 
@@ -30,11 +38,15 @@ ALL_TOOLS = READ_ONLY_TOOLS + [
 ] + [
     t for t in ALL_WEB_TOOLS
     if t not in READ_ONLY_TOOLS
+] + [
+    t for t in ALL_ANYSEARCH_TOOLS
+    if t not in READ_ONLY_TOOLS
 ] + ALL_SKILL_TOOLS + ALL_MCP_TOOLS
 
 __all__ = [
     "ALL_CODE_TOOLS",
     "ALL_WEB_TOOLS",
+    "ALL_ANYSEARCH_TOOLS",
     "ALL_SKILL_TOOLS",
     "ALL_MCP_TOOLS",
     "READ_ONLY_TOOLS",
@@ -47,6 +59,10 @@ __all__ = [
     "tool_execute_code",
     "tool_web_search",
     "tool_web_extract",
+    "tool_any_search",
+    "tool_any_search_domains",
+    "tool_any_search_batch",
+    "tool_any_search_extract",
     "tool_mcp_list",
     "tool_mcp_call",
 ]

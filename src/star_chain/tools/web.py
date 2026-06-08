@@ -233,7 +233,7 @@ def web_search(
 ) -> str:
     """执行 Web 搜索（多引擎 fallback 策略）。
 
-    按优先级依次尝试：Bing → Sogou → DuckDuckGo。
+    按优先级依次尝试：AnySearch → Bing → Sogou → DuckDuckGo。
     任一引擎返回有效结果即停止，避免无谓等待。
 
     Args:
@@ -243,22 +243,30 @@ def web_search(
     Returns:
         格式化搜索结果列表（标题 + URL + 摘要）。
     """
+    from .anysearch import _anysearch_fallback
+
     effective_limit = min(limit, 20)
     errors: List[str] = []
 
-    # 1. Bing（首选）
+    # 1. AnySearch（最高优先级，专业搜索 API）
+    any_result = _anysearch_fallback(query, effective_limit)
+    if any_result:
+        return any_result
+    errors.append("AnySearch: 无结果或不可达")
+
+    # 2. Bing（备选）
     results = _search_bing(query, effective_limit)
     if results:
         engine = "Bing"
     else:
         errors.append("Bing: 无结果或不可达")
-        # 2. Sogou（备选，中文友好）
+        # 3. Sogou（中文友好）
         results = _search_sogou(query, effective_limit)
         if results:
             engine = "Sogou"
         else:
             errors.append("Sogou: 无结果或不可达")
-            # 3. DuckDuckGo（末级 fallback）
+            # 4. DuckDuckGo（末级 fallback）
             results = _search_duckduckgo(query, effective_limit)
             if results:
                 engine = "DuckDuckGo"
@@ -267,7 +275,8 @@ def web_search(
                 return (
                     f"所有搜索引擎均不可用或无结果。\n"
                     f"查询：{query}\n"
-                    f"详情：{'; '.join(errors)}"
+                    f"详情：{'; '.join(errors)}\n\n"
+                    f"提示：可配置 ANYSEARCH_API_KEY 环境变量启用专业搜索服务。"
                 )
 
     lines = [f"=== Web Search ({engine}): {query} ==="]

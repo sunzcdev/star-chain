@@ -836,6 +836,7 @@ class TestToolInvocationFlow:
             "read_file", "search_files", "web_search",
             "write_file", "patch", "terminal", "execute_code",
             "web_extract",
+            "any_search", "any_search_domains", "any_search_batch", "any_search_extract",
             "run_skill", "call_claude_code", "call_open_code",
             "mcp_list", "mcp_call",
         }
@@ -888,7 +889,7 @@ class TestToolInvocationFlow:
         assert plan_names.isdisjoint(forbidden), (
             f"Plan Agent has forbidden tools: {plan_names & forbidden}"
         )
-        assert plan_names == {"read_file", "search_files", "web_search"}
+        assert plan_names == {"read_file", "search_files", "any_search", "web_search"}
         print("✓ test_plan_tools_are_readonly PASSED")
 
     def test_chat_agent_has_zero_tools(self):

@@ -123,14 +123,16 @@ class TestModuleImports:
             ALL_MCP_TOOLS,
             ALL_CODE_TOOLS,
             ALL_WEB_TOOLS,
+            ALL_ANYSEARCH_TOOLS,
             ALL_SKILL_TOOLS,
         )
         # Quick sanity on the tool counts
-        assert len(ALL_TOOLS) >= 13
-        assert len(READ_ONLY_TOOLS) == 3
+        assert len(ALL_TOOLS) >= 17
+        assert len(READ_ONLY_TOOLS) == 4
         assert len(ALL_MCP_TOOLS) == 2
         assert len(ALL_CODE_TOOLS) == 6
         assert len(ALL_WEB_TOOLS) == 2
+        assert len(ALL_ANYSEARCH_TOOLS) == 4
         assert len(ALL_SKILL_TOOLS) == 3
         print("✓ test_all_star_chain_modules_import PASSED")
 
