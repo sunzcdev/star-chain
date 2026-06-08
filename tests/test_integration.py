@@ -513,6 +513,393 @@ class TestCrossPhaseIntegration:
         print("✓ test_all_tool_categories_in_executor_instructions PASSED")
 
 
+# =========================================================================
+# CRITICAL — Agent Model Binding & Interaction Flow
+# =========================================================================
+
+class TestAgentModelBinding:
+    """Critical tests: every Agent must carry a custom model to avoid
+    falling back to the default OpenAI provider (which causes timeout /
+    'Missing credentials' errors in production).
+    """
+
+    def test_all_three_agents_have_model_via_runtime(self):
+        """Chat, Plan, Executor — all three must have model bound via AgentRuntime."""
+        from src.star_chain.runtime import AgentRuntime
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-test",
+                model="test-model",
+                session_dir=tmpdir,
+            )
+            chat = rt._entry_agent
+            assert chat.model is not None, "Chat Agent must have a model"
+
+            plan = _resolve_agent(chat.handoffs[0])
+            assert plan.model is not None, "Plan Agent must have a model"
+
+            to_exec = next(h for h in plan.handoffs if h.tool_name == "handoff_to_executor")
+            executor = _resolve_agent(to_exec)
+            assert executor.model is not None, "Executor Agent must have a model"
+
+            print("✓ test_all_three_agents_have_model_via_runtime PASSED")
+
+    def test_build_topology_accepts_model_param(self):
+        """build_agent_topology(model=...) propagates model to every agent."""
+        from src.star_chain.agents import build_agent_topology
+        from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(base_url="https://example.com", api_key="sk-x", timeout=5)
+        model = OpenAIChatCompletionsModel(model="m-1", openai_client=client)
+
+        chat = build_agent_topology(model=model)
+        assert chat.model is model
+
+        plan = _resolve_agent(chat.handoffs[0])
+        assert plan.model is model
+
+        to_exec = next(h for h in plan.handoffs if h.tool_name == "handoff_to_executor")
+        executor = _resolve_agent(to_exec)
+        assert executor.model is model
+
+        print("✓ test_build_topology_accepts_model_param PASSED")
+
+    def test_runtime_uses_custom_client_not_default_provider(self):
+        """AgentRuntime must use its own AsyncOpenAI client (not default OPENAI_API_KEY).
+
+        This is the root cause of the original '请求超时' bug — if agents
+        don't carry a model, the SDK falls back to the default provider
+        which looks for OPENAI_API_KEY env var, fails, and eventually
+        times out.
+        """
+        from src.star_chain.runtime import AgentRuntime
+        from agents import Runner
+        import openai
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             mock_patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False):
+
+            rt = AgentRuntime(
+                base_url="https://api.deepseek.com",
+                api_key="sk-invalid-for-test",
+                model="deepseek-v4-flash",
+                session_dir=tmpdir,
+            )
+
+            async def _run():
+                resp = await rt.handle_message("u_model_test", "hello")
+                return resp
+
+            # If model binding is broken, we'd see 'Missing credentials'
+            # from the default OpenAI provider. Correct behaviour is an
+            # auth error from OUR client talking to deepseek.com.
+            resp = asyncio.run(_run())
+            assert "Missing credentials" not in resp, (
+                "Agents fell back to default OpenAI provider — model not bound!"
+            )
+            # Our client should reach deepseek.com and get a 401 (bad key)
+            assert (
+                "401" in resp
+                or "Authentication" in resp
+                or "invalid" in resp.lower()
+                or "处理失败" in resp
+            )
+            print("✓ test_runtime_uses_custom_client_not_default_provider PASSED")
+
+
+class TestFullInteractionFlow:
+    """Full user-interaction flow tests with Runner mocked.
+
+    Simulates the complete journey:
+      1. User sends message via Feishu
+      2. Runtime feeds session history into Runner
+      3. Runner produces final_output
+      4. Runtime saves history and returns reply
+      5. Reply is sent back through adapter
+    """
+
+    def test_single_message_round_trip(self):
+        """Single user message → Agent reply → history saved correctly."""
+        from src.star_chain.runtime import AgentRuntime
+        from agents import Runner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-fake",
+                model="fake-model",
+                session_dir=tmpdir,
+            )
+
+            with mock_patch.object(Runner, "run", new_callable=AsyncMock) as mock_run:
+                mock_result = MagicMock()
+                mock_result.final_output = "Hello, I can help with that!"
+                mock_run.return_value = mock_result
+
+                reply = asyncio.run(rt.handle_message("u_flow1", "请帮我写个 Python 脚本"))
+
+                assert reply == "Hello, I can help with that!"
+
+                # Runner.run should have been called once
+                assert mock_run.await_count == 1
+                call_args = mock_run.await_args
+                assert call_args.kwargs["max_turns"] == rt._max_turns
+
+                # History should contain user + assistant messages
+                session = rt._get_or_create_session("u_flow1")
+                assert len(session.history) == 2
+                assert session.history[0]["role"] == "user"
+                assert session.history[0]["content"] == "请帮我写个 Python 脚本"
+                assert session.history[1]["role"] == "assistant"
+                assert session.history[1]["content"] == "Hello, I can help with that!"
+
+                print("✓ test_single_message_round_trip PASSED")
+
+    def test_multi_turn_conversation_preserves_history(self):
+        """Multi-turn conversation accumulates history across turns."""
+        from src.star_chain.runtime import AgentRuntime
+        from agents import Runner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-fake",
+                model="fake-model",
+                session_dir=tmpdir,
+            )
+
+            replies = ["Sure!", "Let me check that...", "Done!"]
+            turn_idx = [0]
+
+            async def fake_run(*args, **kwargs):
+                result = MagicMock()
+                result.final_output = replies[turn_idx[0]]
+                turn_idx[0] += 1
+                return result
+
+            with mock_patch.object(Runner, "run", side_effect=fake_run):
+                r1 = asyncio.run(rt.handle_message("u_multi", "first"))
+                r2 = asyncio.run(rt.handle_message("u_multi", "second"))
+                r3 = asyncio.run(rt.handle_message("u_multi", "third"))
+
+                assert [r1, r2, r3] == replies
+
+                session = rt._get_or_create_session("u_multi")
+                # 3 turns × 2 messages each = 6
+                assert len(session.history) == 6
+                roles = [h["role"] for h in session.history]
+                assert roles == ["user", "assistant", "user", "assistant", "user", "assistant"]
+
+                print("✓ test_multi_turn_conversation_preserves_history PASSED")
+
+    def test_new_command_clears_history_between_conversations(self):
+        """/new wipes history; subsequent message starts fresh."""
+        from src.star_chain.runtime import AgentRuntime
+        from agents import Runner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-fake",
+                model="fake-model",
+                session_dir=tmpdir,
+            )
+
+            with mock_patch.object(Runner, "run", new_callable=AsyncMock) as mock_run:
+                mock_result = MagicMock()
+                mock_result.final_output = "Ack"
+                mock_run.return_value = mock_result
+
+                # Turn 1
+                asyncio.run(rt.handle_message("u_new", "hello"))
+                assert len(rt._get_or_create_session("u_new").history) == 2
+
+                # /new
+                reply = asyncio.run(rt.handle_message("u_new", "/new"))
+                assert "重置" in reply or "会话" in reply
+                assert len(rt._get_or_create_session("u_new").history) == 0
+
+                # Turn 2 (fresh)
+                asyncio.run(rt.handle_message("u_new", "fresh start"))
+                assert len(rt._get_or_create_session("u_new").history) == 2
+
+                print("✓ test_new_command_clears_history_between_conversations PASSED")
+
+    def test_session_history_persists_on_disk(self):
+        """After handle_message, session data must be written to disk."""
+        from src.star_chain.runtime import AgentRuntime
+        from src.star_chain.session import SessionContext
+        from agents import Runner
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-fake",
+                model="fake-model",
+                session_dir=tmpdir,
+            )
+
+            with mock_patch.object(Runner, "run", new_callable=AsyncMock) as mock_run:
+                mock_result = MagicMock()
+                mock_result.final_output = "persisted reply"
+                mock_run.return_value = mock_result
+
+                asyncio.run(rt.handle_message("u_disk", "persist me"))
+
+                # Load a FRESH SessionContext from the same dir
+                fresh = SessionContext(user_id="u_disk", storage_dir=tmpdir)
+                assert len(fresh.history) == 2
+                assert fresh.history[1]["content"] == "persisted reply"
+
+                print("✓ test_session_history_persists_on_disk PASSED")
+
+    def test_feishu_adapter_runtime_full_pipeline(self):
+        """FeishuAdapter + AgentRuntime working together end-to-end."""
+        from src.star_chain.runtime import AgentRuntime
+        from src.star_chain.feishu_adapter import FeishuAdapter
+        from lark_oapi.channel.types import InboundMessage, Conversation, Identity
+        from agents import Runner
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             mock_patch("src.star_chain.feishu_adapter.FeishuChannel") as MockChannel, \
+             mock_patch.object(Runner, "run", new_callable=AsyncMock) as mock_run:
+
+            fake_ch = MagicMock()
+            fake_ch.connect_until_ready = AsyncMock()
+            fake_ch.disconnect = AsyncMock()
+            fake_ch.send = AsyncMock(return_value=MagicMock(success=True, message_id="m1"))
+            MockChannel.return_value = fake_ch
+
+            mock_result = MagicMock()
+            mock_result.final_output = "Pipeline OK"
+            mock_run.return_value = mock_result
+
+            rt = AgentRuntime(
+                base_url="https://example.com/v1",
+                api_key="sk-fake",
+                model="fake-model",
+                session_dir=tmpdir,
+            )
+
+            adapter = FeishuAdapter(app_id="x", app_secret="y")
+
+            async def _test():
+                async def on_message(event):
+                    reply = await rt.handle_message(event.user_id, event.text)
+                    await adapter.send_message(event.user_id, reply)
+
+                await adapter.start(on_message)
+
+                msg = InboundMessage(
+                    id="m_pipe",
+                    create_time=1,
+                    conversation=Conversation(chat_id="ou_pipe", chat_type="p2p"),
+                    sender=Identity(open_id="ou_pipe"),
+                    mentions=[],
+                    mentioned_all=False,
+                    reply=None,
+                    content=None,
+                    raw={},
+                    content_text="pipeline test",
+                    resources=[],
+                    mentioned_bot=False,
+                    raw_content_type="text",
+                )
+                await adapter._handle_message(msg)
+
+                assert fake_ch.send.await_count == 1
+                send_args = fake_ch.send.await_args
+                assert send_args.args[0] == "ou_pipe"
+                assert send_args.args[1]["text"] == "Pipeline OK"
+
+                await adapter.stop()
+
+            asyncio.run(_test())
+            print("✓ test_feishu_adapter_runtime_full_pipeline PASSED")
+
+
+class TestToolInvocationFlow:
+    """Tests that the tool layer is correctly wired and each tool is callable.
+
+    These are smoke tests for every tool that Executor has access to, to
+    make sure no import / wiring regressions have occurred.
+    """
+
+    def test_all_executor_tools_are_callable_objects(self):
+        """Every tool in ALL_TOOLS must be a valid FunctionTool with on_invoke_tool."""
+        from src.star_chain.tools import ALL_TOOLS
+
+        expected_names = {
+            "read_file", "search_files", "web_search",
+            "write_file", "patch", "terminal", "execute_code",
+            "web_extract",
+            "run_skill", "call_claude_code", "call_open_code",
+            "mcp_list", "mcp_call",
+        }
+
+        actual_names = set()
+        for t in ALL_TOOLS:
+            name = getattr(t, "name", None)
+            assert name is not None, f"Tool without name: {t}"
+            assert hasattr(t, "on_invoke_tool"), f"Tool {name} missing on_invoke_tool"
+            assert t.on_invoke_tool is not None, f"Tool {name} has null invoker"
+            actual_names.add(name)
+
+        assert actual_names == expected_names, (
+            f"Tool set mismatch. Missing: {expected_names - actual_names}, "
+            f"Extra: {actual_names - expected_names}"
+        )
+        print(f"✓ test_all_executor_tools_are_callable_objects PASSED ({len(ALL_TOOLS)} tools)")
+
+    def test_executor_tool_permissions_match_instructions(self):
+        """Executor's actual tool set must match what its instructions claim."""
+        from src.star_chain.agents import build_agent_topology
+        from src.star_chain.tools import ALL_TOOLS
+
+        chat = build_agent_topology()
+        plan = _resolve_agent(chat.handoffs[0])
+        to_exec = next(h for h in plan.handoffs if h.tool_name == "handoff_to_executor")
+        executor = _resolve_agent(to_exec)
+
+        tool_names = {getattr(t, "name", str(t)) for t in executor.tools}
+        all_names = {getattr(t, "name", str(t)) for t in ALL_TOOLS}
+        assert tool_names == all_names
+
+        instructions = executor.instructions
+        for name in tool_names:
+            assert name in instructions, (
+                f"Executor instructions don't mention tool '{name}'"
+            )
+        print("✓ test_executor_tool_permissions_match_instructions PASSED")
+
+    def test_plan_tools_are_readonly(self):
+        """Plan Agent must NEVER have write / exec tools."""
+        from src.star_chain.agents import build_agent_topology
+
+        chat = build_agent_topology()
+        plan = _resolve_agent(chat.handoffs[0])
+
+        plan_names = {getattr(t, "name", str(t)) for t in plan.tools}
+        forbidden = {"write_file", "patch", "terminal", "execute_code", "web_extract",
+                     "run_skill", "call_claude_code", "call_open_code", "mcp_list", "mcp_call"}
+        assert plan_names.isdisjoint(forbidden), (
+            f"Plan Agent has forbidden tools: {plan_names & forbidden}"
+        )
+        assert plan_names == {"read_file", "search_files", "web_search"}
+        print("✓ test_plan_tools_are_readonly PASSED")
+
+    def test_chat_agent_has_zero_tools(self):
+        """Chat Agent must have zero tools — pure conversation gateway."""
+        from src.star_chain.agents import build_agent_topology
+
+        chat = build_agent_topology()
+        assert len(chat.tools) == 0, f"Chat has tools: {[t.name for t in chat.tools]}"
+        print("✓ test_chat_agent_has_zero_tools PASSED")
+
+
 if __name__ == "__main__":
     import pytest as _pytest
     sys.exit(_pytest.main([__file__, "-v"]))

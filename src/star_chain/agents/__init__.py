@@ -9,17 +9,22 @@
   - Executor: 全工具（Code + Web + Skill + MCP）
 """
 
+from typing import Optional
+
 from agents import Agent, handoff
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 from ..tools import READ_ONLY_TOOLS, ALL_TOOLS
 
+_ModelT = Optional["object"]
 
-def build_chat_agent(plan_agent: Agent) -> Agent:
+
+def build_chat_agent(plan_agent: Agent, *, model: _ModelT = None) -> Agent:
     """构建 Chat Agent — 对话入口/出口网关。
 
     Args:
         plan_agent: Plan Agent 实例，用于 handoff。
+        model: 可选，绑定的 LLM 模型实例。
 
     Returns:
         配置好的 Chat Agent。
@@ -39,6 +44,7 @@ def build_chat_agent(plan_agent: Agent) -> Agent:
 - 不要自己执行任务——你是聊天角色，不是执行者
 - 执行任务请 handoff 给 Plan
 """,
+        model=model,
         handoffs=[
             handoff(
                 plan_agent,
@@ -49,12 +55,13 @@ def build_chat_agent(plan_agent: Agent) -> Agent:
     )
 
 
-def build_plan_agent(executor_agent: Agent, chat_agent: Agent) -> Agent:
+def build_plan_agent(executor_agent: Agent, chat_agent: Agent, *, model: _ModelT = None) -> Agent:
     """构建 Plan Agent — 方案规划师。
 
     Args:
         executor_agent: Executor Agent 实例，用于 handoff。
         chat_agent: Chat Agent 实例，用于 handoff。
+        model: 可选，绑定的 LLM 模型实例。
 
     Returns:
         配置好的 Plan Agent，绑定只读工具。
@@ -80,6 +87,7 @@ def build_plan_agent(executor_agent: Agent, chat_agent: Agent) -> Agent:
 - 方案准备好后，handoff 给 Executor 去执行
 - 如果需求不清晰，handoff 回 Chat 让用户补充
 """,
+        model=model,
         tools=READ_ONLY_TOOLS,
         handoffs=[
             handoff(
@@ -96,11 +104,12 @@ def build_plan_agent(executor_agent: Agent, chat_agent: Agent) -> Agent:
     )
 
 
-def build_executor_agent(chat_agent: Agent) -> Agent:
+def build_executor_agent(chat_agent: Agent, *, model: _ModelT = None) -> Agent:
     """构建 Executor Agent — 执行者。
 
     Args:
         chat_agent: Chat Agent 实例，用于 handoff。
+        model: 可选，绑定的 LLM 模型实例。
 
     Returns:
         配置好的 Executor Agent，绑定全套工具。
@@ -126,6 +135,7 @@ def build_executor_agent(chat_agent: Agent) -> Agent:
 - 遇到问题主动 handoff 回 Chat 讨论
 - 完成后 handoff 回 Chat 报告结果
 """,
+        model=model,
         tools=ALL_TOOLS,
         handoffs=[
             handoff(
@@ -152,7 +162,7 @@ _CHAT_INSTRUCTIONS = f"""{RECOMMENDED_PROMPT_PREFIX}
 """
 
 
-def build_agent_topology() -> Agent:
+def build_agent_topology(*, model: _ModelT = None) -> Agent:
     """构建完整的三 Agent 拓扑，返回入口 Agent（Chat）。
 
     按依赖顺序创建以解决循环引用：
@@ -161,17 +171,21 @@ def build_agent_topology() -> Agent:
         3. 创建 Plan（依赖 Executor 和 Chat）
         4. 补充 Chat 的 handoffs（依赖 Plan）
 
+    Args:
+        model: 可选，绑定到所有三个 Agent 的 LLM 模型实例。
+
     Returns:
         Chat Agent 作为整个流水线的入口。
     """
     chat_agent = Agent(
         name="Chat",
         instructions=_CHAT_INSTRUCTIONS,
+        model=model,
         handoffs=[],
     )
 
-    executor_agent = build_executor_agent(chat_agent)
-    plan_agent = build_plan_agent(executor_agent, chat_agent)
+    executor_agent = build_executor_agent(chat_agent, model=model)
+    plan_agent = build_plan_agent(executor_agent, chat_agent, model=model)
 
     chat_agent.handoffs = [
         handoff(

@@ -90,7 +90,7 @@ class AgentRuntime:
                     max_turns=self._max_turns,
                     run_config=self._run_config,
                 ),
-                timeout=120,
+                timeout=300,
             )
             response = result.final_output
             if not isinstance(response, str):
@@ -102,6 +102,7 @@ class AgentRuntime:
 
         except asyncio.TimeoutError:
             error_msg = "请求超时，请稍后再试。"
+            logger.warning("handle_message timeout for user %s after 300s", user_id)
             session.add_assistant_message(error_msg)
             session.save()
             return error_msg
@@ -125,7 +126,7 @@ class AgentRuntime:
         Returns:
             Chat Agent 作为整个流水线的入口。
         """
-        return build_agent_topology()
+        return build_agent_topology(model=self._model)
 
     def _get_or_create_session(self, user_id: str) -> SessionContext:
         if user_id not in self._sessions:
