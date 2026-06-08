@@ -14,6 +14,7 @@ DEFAULT_STORAGE_ROOT = "~/.star-chain/feishu/accounts"
 
 
 class CredentialType(str, Enum):
+    WECHAT = "wechat"
     FEISHU = "feishu"
 
 
@@ -21,10 +22,18 @@ class CredentialType(str, Enum):
 class AccountCredential:
     account_id: str
     credential_type: str = "feishu"
+
+    # WeChat 字段
+    token: str = ""            # ilink_bot_token
+    base_url: str = ""         # iLink API 地址
+
+    # Feishu 字段
     app_secret: str = ""
     domain: str = "feishu.cn"
     user_name: str = ""
     avatar_url: str = ""
+
+    # 通用
     user_id: str = ""
     saved_at: str = ""
 

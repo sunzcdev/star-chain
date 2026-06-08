@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""StarChain — 入口。飞书渠道 + AgentRuntime 的三 Agent 协作。"""
+"""StarChain — 入口。飞书 + 微信双渠道 + AgentRuntime 的三 Agent 协作。
+
+如果使用系统 Python 直接执行，本脚本会自动检测并重新使用项目的
+.venv 虚拟环境，确保依赖（如 lark_oapi.channel）可被正确加载。
+"""
 
 import asyncio
 import logging
@@ -11,17 +15,25 @@ _project_root = os.path.dirname(os.path.abspath(__file__))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
+_venv_python = os.path.join(_project_root, ".venv", "bin", "python3")
+if os.path.exists(_venv_python) and sys.executable != _venv_python:
+    os.execv(_venv_python, [_venv_python, __file__, *sys.argv[1:]])
+
 from src.star_chain.account_store import AccountStore
 from src.star_chain.feishu_adapter import FeishuAdapter
+from src.star_chain.wechat_adapter import WeChatAdapter
 from src.star_chain.runtime import AgentRuntime
 from src.star_chain.utils import setup_logging
 
 logger = logging.getLogger(__name__)
 
+WECHAT_ACCOUNT_DIR = "~/.agent-channel/weixin/accounts"
+FEISHU_ACCOUNT_DIR = "~/.star-chain/feishu/accounts"
+
 
 def _get_feishu_config() -> dict:
     """获取飞书凭证：优先 AccountStore，回退到环境变量。"""
-    store = AccountStore("~/.star-chain/feishu/accounts")
+    store = AccountStore(FEISHU_ACCOUNT_DIR)
     accounts = store.list_accounts()
     if accounts:
         cred = accounts[0]
@@ -40,13 +52,24 @@ def _get_feishu_config() -> dict:
     return {"feishu_app_id": "", "feishu_app_secret": ""}
 
 
+def _get_wechat_config() -> dict | None:
+    """获取微信凭证：从 AccountStore 加载。"""
+    store = AccountStore(WECHAT_ACCOUNT_DIR)
+    accounts = store.list_accounts()
+    if accounts:
+        cred = accounts[0]
+        logger.info("loaded weixin credentials from AccountStore: %s", cred.account_id)
+        return {
+            "token": cred.token,
+            "account_id": cred.account_id,
+            "base_url": cred.base_url or "https://ilinkai.weixin.qq.com",
+        }
+    logger.warning("微信凭证未配置 — 目录 %s 为空", WECHAT_ACCOUNT_DIR)
+    return None
+
+
 async def main():
     setup_logging()
-
-    feishu_cfg = _get_feishu_config()
-    if not feishu_cfg["feishu_app_id"]:
-        logger.error("飞书凭证缺失，退出")
-        sys.exit(1)
 
     session_dir = os.environ.get("STAR_CHAIN_SESSION_DIR", "~/.star-chain/sessions")
     max_turns = int(os.environ.get("STAR_CHAIN_MAX_TURNS", "30"))
@@ -57,30 +80,59 @@ async def main():
         session_dir=session_dir,
     )
 
-    # 2. 初始化飞书适配器
-    logger.info("Initializing FeishuAdapter ...")
-    adapter = FeishuAdapter(
-        app_id=feishu_cfg["feishu_app_id"],
-        app_secret=feishu_cfg["feishu_app_secret"],
-    )
-
-    # 3. 消息处理回调
-    async def on_message(event):
-        logger.info("received message from %s: %s...", event.user_id, event.text[:60])
+    # 所有渠道共享同一个消息处理
+    async def on_message(adapter, event):
         if event.text.strip().lower() in ("/stop", "/quit"):
             logger.info("stop command received, shutting down")
             asyncio.get_event_loop().stop()
             return
+        logger.info("received message from %s: %s...", event.user_id, event.text[:60])
         response = await runtime.handle_message(event.user_id, event.text)
         await adapter.send_message(event.user_id, response)
         logger.info("sent response to %s: %s...", event.user_id, response[:60])
 
-    # 4. 启动
-    await adapter.start(on_message)
+    adapters = []
 
-    logger.info("StarChain started — listening via Feishu (app_id=%s)", feishu_cfg["feishu_app_id"])
+    # 1. 飞书渠道
+    feishu_cfg = _get_feishu_config()
+    if feishu_cfg["feishu_app_id"]:
+        logger.info("Initializing FeishuAdapter ...")
+        feishu_adapter = FeishuAdapter(
+            app_id=feishu_cfg["feishu_app_id"],
+            app_secret=feishu_cfg["feishu_app_secret"],
+        )
+        adapters.append(("feishu", feishu_adapter))
+    else:
+        logger.warning("飞书凭证缺失，跳过飞书渠道")
 
-    # 5. 等待退出信号
+    # 2. 微信渠道
+    wechat_cfg = _get_wechat_config()
+    if wechat_cfg:
+        logger.info("Initializing WeChatAdapter ...")
+        wechat_adapter = WeChatAdapter(
+            token=wechat_cfg["token"],
+            account_id=wechat_cfg["account_id"],
+            base_url=wechat_cfg["base_url"],
+        )
+        adapters.append(("weixin", wechat_adapter))
+    else:
+        logger.warning("微信凭证缺失，跳过微信渠道")
+
+    if not adapters:
+        logger.error("所有渠道凭证均缺失，退出")
+        sys.exit(1)
+
+    # 3. 启动所有渠道
+    for name, adapter in adapters:
+        logger.info("Starting %s adapter ...", name)
+        await adapter.start(lambda event, a=adapter: on_message(a, event))
+
+    logger.info(
+        "StarChain started — listening via %s",
+        ", ".join(name for name, _ in adapters),
+    )
+
+    # 4. 等待退出信号
     stop_event = asyncio.Event()
 
     def _signal_handler():
@@ -96,9 +148,17 @@ async def main():
 
     await stop_event.wait()
 
-    # 6. 清理
+    # 5. 清理
     logger.info("shutting down ...")
-    await adapter.stop()
+    for _, adapter in adapters:
+        await adapter.stop()
+
+    pending = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
     logger.info("shutdown complete")
 
 
